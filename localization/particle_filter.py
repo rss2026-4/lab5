@@ -7,6 +7,10 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 from rclpy.node import Node
 import rclpy
 
+import numpy as np
+from scipy.spatial.transform import Rotation
+from sensor_msgs.msg import LaserScan
+
 assert rclpy
 
 
@@ -61,7 +65,7 @@ class ParticleFilter(Node):
 
         # Initialize the models
         self.motion_model = MotionModel(self)
-        self.sensor_model = SensorModel(self)
+        # self.sensor_model = SensorModel(self)
 
         self.get_logger().info("=============+READY+=============")
 
@@ -75,6 +79,60 @@ class ParticleFilter(Node):
         # Publish a transformation frame between the map
         # and the particle_filter_frame.
 
+        self.num_particles = 3
+        self.init_mean = 0
+        self.init_std_dev = .5
+        self.particles = 0
+
+    def pose_callback(self, msg):
+        
+        # initialize particles with certain spread around given point from rviz
+        noise = np.random.normal(self.init_mean, self.init_std_dev, size = (self.num_particles, 3))
+        
+        # self.get_logger().info("Pose %s " % msg.pose)
+        x = msg.pose.pose.position.x
+        y = msg.pose.pose.position.y
+
+        thx = msg.pose.pose.orientation.x
+        thy = msg.pose.pose.orientation.y
+        thz = msg.pose.pose.orientation.z
+        thw = msg.pose.pose.orientation.w
+
+        theta = Rotation.from_quat([thx, thy, thz, thw]).as_euler('xyz')[2] # converting quat -> euler -> taking z rotation; x and y should be 0
+        # self.get_logger().info("Rotation %s " % theta)
+        particles = np.array([x, y, theta])
+        noisy_particles = particles + noise
+        self.get_logger().info("og %s " % particles)
+        self.get_logger().info("no %s " % noisy_particles)
+        
+        self.particles = noisy_particles = particles + noise
+        
+        
+    # upon new odom msg, apply motion model to get new particle pos
+    def odom_callback(self, msg):
+        # extract data from msg
+        odometry = 0
+
+        # apply motion model
+        updated_particles = self.motion_model.evaluate(self.particles, odometry)
+
+
+        # determine new avg 
+        
+            
+    # upon new sensor msg, apply sensor model to get partgicle probabilies
+    def laser_callback(self, msg):
+        # extract & filter lidar data
+        laser_observations = 0 
+
+
+        # apply sensor model
+        updated_probabilties = self.sensor_model.evaluate(self.particles, laser_observations)
+
+        # return new avg
+        pass
+    
+    # some sort of visualization function; maybe want to create whole other node for it
 
 def main(args=None):
     rclpy.init(args=args)
