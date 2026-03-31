@@ -31,11 +31,11 @@ class SensorModel:
 
         ####################################
         # Adjust these parameters
-        self.alpha_hit = 0
-        self.alpha_short = 0
-        self.alpha_max = 0
-        self.alpha_rand = 0
-        self.sigma_hit = 0
+        self.alpha_hit = 0.74
+        self.alpha_short = 0.07
+        self.alpha_max = 0.07
+        self.alpha_rand = 0.12
+        self.sigma_hit = 0.5
 
         # Your sensor table will be a `table_width` x `table_width` np array:
         self.table_width = 201
@@ -87,7 +87,45 @@ class SensorModel:
             No return type. Directly modify `self.sensor_model_table`.
         """
 
-        raise NotImplementedError
+        z_max = self.table_width - 1
+        sigma = self.sigma_hit
+
+        # z = measured range (rows), d = expected/ground truth range (columns)
+        z_vals = np.arange(self.table_width)
+        d_vals = np.arange(self.table_width)
+
+        # p_hit: Gaussian centered at d
+        # Shape: (table_width, table_width) via broadcasting
+        z_grid = z_vals[:, None]  # (201, 1)
+        d_grid = d_vals[None, :]  # (1, 201)
+        p_hit = np.exp(-0.5 * ((z_grid - d_grid) / sigma) ** 2) / (np.sqrt(2 * np.pi) * sigma)
+        # Normalize p_hit per column (per d value) so each column sums to 1
+        p_hit /= p_hit.sum(axis=0, keepdims=True)
+
+        # p_short: downward sloping line
+        p_short = np.zeros((self.table_width, self.table_width))
+        for d in range(1, self.table_width):  # skip d=0
+            mask = z_vals <= d
+            p_short[mask, d] = (2.0 / d) * (1.0 - z_vals[mask] / d)
+
+        # p_max: spike at z_max
+        p_max = np.zeros((self.table_width, self.table_width))
+        p_max[z_max, :] = 1.0
+
+        # p_rand: uniform
+        p_rand = np.ones((self.table_width, self.table_width)) / z_max
+
+        # Combine
+        table = (self.alpha_hit * p_hit +
+                self.alpha_short * p_short +
+                self.alpha_max * p_max +
+                self.alpha_rand * p_rand)
+
+        # Normalize each column (each d value) so probabilities sum to 1
+        table /= table.sum(axis=0, keepdims=True)
+
+        self.sensor_model_table = table 
+
 
     def evaluate(self, particles, observation):
         """
@@ -122,6 +160,25 @@ class SensorModel:
         # This produces a matrix of size N x num_beams_per_particle 
 
         scans = self.scan_sim.scan(particles)
+
+        # Scale the real observation to map scale
+        observation = observation * self.lidar_scale_to_map_scale
+
+        # Clip and discretize to table indices
+        z_max = self.table_width - 1
+        obs_indices = np.clip(observation, 0, z_max).astype(int)       # (num_beams,)
+        scan_indices = np.clip(scans, 0, z_max).astype(int)            # (N, num_beams)
+
+        # Look up probabilities from precomputed table
+        # sensor_model_table[z, d] = p(z | d)
+        probs = self.sensor_model_table[obs_indices, scan_indices]     # (N, num_beams)
+
+        # Multiply across beams (use log-sum to avoid underflow)
+        log_probs = np.sum(np.log(probs + 1e-300), axis=1)            # (N,)
+        probabilities = np.exp(log_probs)
+
+
+        return probabilities
 
         ####################################
 
