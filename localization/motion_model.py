@@ -1,4 +1,5 @@
-
+import numpy as np
+import matplotlib.pyplot as plt
 
 class MotionModel:
 
@@ -8,8 +9,11 @@ class MotionModel:
         # Do any precomputation for the motion
         # model here.
 
-        pass
-
+        self.deterministic = False 
+        self.node = node
+        self.mean = 0
+        self.std_dev = 0.1
+            
         ####################################
 
     def evaluate(self, particles, odometry):
@@ -32,8 +36,42 @@ class MotionModel:
         """
 
         ####################################
-        # TODO
+        x = particles[:, 0:1]
+        y = particles[:, 1:2]
+        theta = particles[:, 2:]
 
-        raise NotImplementedError
+        N = len(x)
 
+        dx = odometry[0]
+        dy = odometry[1]
+        dtheta = odometry[2] 
+        
+        # apply motion 
+        new_x = x + dx*np.cos(theta) - dy*np.sin(theta)
+        new_y = y + dx*np.sin(theta) + dy*np.cos(theta)
+        new_theta = theta + dtheta
+        updated_particles = np.hstack([new_x, new_y, new_theta])
+
+
+        # no noise
+        if self.deterministic:
+            # plt.plot(x, y, 'bo', label="original pos")
+            # plt.plot(new_x, new_y, 'ro', label="new pos")
+            # plt.title("Motion Model (noiseless)")
+            # for i in range(N):
+            #     plt.plot([new_x[i],x[i]], [new_y[i], y[i]], 'g')
+            # plt.ylabel("y_pos")
+            # plt.xlabel("x_pos")
+            # plt.legend()
+            # plt.show()
+            self.node.get_logger().info("No Noise")
+            return updated_particles 
+        
+        # noise added
+        else: 
+            self.node.get_logger().info("Yes Noise")
+            noise = np.random.normal(self.mean, self.std_dev, size = (N, 3)) # mean = 0, scale = 1
+            noisy_particles = updated_particles + noise
+            return noisy_particles
+        
         ####################################
