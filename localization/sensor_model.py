@@ -16,7 +16,7 @@ class SensorModel:
 
     def __init__(self, node):
         node.declare_parameter('map_topic', "default")
-        node.declare_parameter('num_beams_per_particle', 1)
+        node.declare_parameter('num_beams_per_particle', 100)
         node.declare_parameter('scan_theta_discretization', 1.0)
         node.declare_parameter('scan_field_of_view', 1.0)
         node.declare_parameter('lidar_scale_to_map_scale', 1.0)
@@ -152,7 +152,6 @@ class SensorModel:
             return
 
         ####################################
-        # TODO
         # Evaluate the sensor model here!
         #
         # You will probably want to use this function

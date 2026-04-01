@@ -39,6 +39,7 @@ setup(
     entry_points={
         'console_scripts': [
             'particle_filter = localization.particle_filter:main',
+            'teleop = localization.teleop:main',
             'sensor_model_test = localization.test.sensor_model_test:main',
             'motion_model_test = localization.test.motion_model_test:main',
         ],
