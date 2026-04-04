@@ -160,8 +160,10 @@ class SensorModel:
 
         scans = self.scan_sim.scan(particles)
 
-        # Scale the real observation to map scale
-        observation = observation * self.lidar_scale_to_map_scale
+        # Scale from meters to map pixels
+        scale = self.resolution * self.lidar_scale_to_map_scale
+        observation = observation / scale
+        scans = scans / scale
 
         # Clip and discretize to table indices
         z_max = self.table_width - 1
@@ -173,7 +175,8 @@ class SensorModel:
         probs = self.sensor_model_table[obs_indices, scan_indices]     # (N, num_beams)
 
         # Multiply across beams (use log-sum to avoid underflow)
-        log_probs = np.sum(np.log(probs + 1e-300), axis=1)            # (N,)
+        # Squash by 1/num_beams to prevent particle depletion
+        log_probs = np.sum(np.log(probs + 1e-300), axis=1) / observation.shape[0]
         probabilities = np.exp(log_probs)
 
 

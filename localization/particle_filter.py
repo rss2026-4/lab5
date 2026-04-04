@@ -22,7 +22,8 @@ class ParticleFilter(Node):
         super().__init__("particle_filter")
 
         self.declare_parameter('particle_filter_frame', "default")
-        self.particle_filter_frame = self.get_parameter('particle_filter_frame').get_parameter_value().string_value
+        pf_frame = self.get_parameter('particle_filter_frame').get_parameter_value().string_value
+        self.particle_filter_frame = pf_frame.lstrip('/')
 
         #  *Important Note #1:* It is critical for your particle
         #     filter to obtain the following topic names from the
@@ -38,13 +39,8 @@ class ParticleFilter(Node):
         scan_topic = self.get_parameter("scan_topic").get_parameter_value().string_value
         odom_topic = self.get_parameter("odom_topic").get_parameter_value().string_value
 
-        self.laser_sub = self.create_subscription(LaserScan, scan_topic,
-                                                  self.laser_callback,
-                                                  1)
-
-        self.odom_sub = self.create_subscription(Odometry, odom_topic,
-                                                 self.odom_callback,
-                                                 1)
+        self.laser_sub = self.create_subscription(LaserScan, scan_topic, self.laser_callback, 1)
+        self.odom_sub = self.create_subscription(Odometry, odom_topic, self.odom_callback, 1)
 
         #  *Important Note #2:* You must respond to pose
         #     initialization requests sent to the /initialpose
@@ -52,9 +48,7 @@ class ParticleFilter(Node):
         #     "Pose Estimate" feature in RViz, which publishes to
         #     /initialpose.
 
-        self.pose_sub = self.create_subscription(PoseWithCovarianceStamped, "/initialpose",
-                                                 self.pose_callback,
-                                                 1)
+        self.pose_sub = self.create_subscription(PoseWithCovarianceStamped, "/initialpose", self.pose_callback, 1)
 
         #  *Important Note #3:* You must publish your pose estimate to
         #     the following topic. In particular, you must use the
@@ -83,6 +77,8 @@ class ParticleFilter(Node):
 
         self.tf_broadcaster = TransformBroadcaster(self)
         self.pose_array_pub = self.create_publisher(PoseArray, "/particles", 1)
+        self.scan_pub = self.create_publisher(LaserScan, "/pf/scan", 1)
+        self.latest_scan = None
 
         self.get_logger().info("=============+READY+=============")
 
@@ -102,7 +98,8 @@ class ParticleFilter(Node):
 
         # noiseily scatter partildes aroudn clicked pose
         center = np.array([x, y, theta])
-        noise = np.random.normal(0, 0.5, size=(self.num_particles, 3))
+        noise = np.random.normal(0, 0.1, size=(self.num_particles, 3))
+        # noise = np.zeros((self.num_particles, 3))
         self.particles = center + noise
         self.weights = np.ones(self.num_particles) / self.num_particles
         self.particle_init = True
@@ -139,7 +136,6 @@ class ParticleFilter(Node):
 
         self.particles = self.motion_model.evaluate(self.particles, odometry)
         self.publish_pose_estimate()
-        
             
     def laser_callback(self, msg):
         """
@@ -147,7 +143,8 @@ class ParticleFilter(Node):
         then scores the particles based on the sensor model which tells how likely each
         particle is to observe the scan. Then it resamples the particles based on weights.
         """
-        # return if particles have not been initialized
+        self.latest_scan = msg
+
         if not self.particle_init:
             return
 
@@ -156,25 +153,24 @@ class ParticleFilter(Node):
         indices = np.linspace(0, len(ranges) - 1, self.num_beams_per_particle, dtype=int)
         downsampled = ranges[indices]
 
-        # evalute each particle with senosr model and normallize
-        self.weights = self.sensor_model.evaluate(self.particles, downsampled)
-        self.weights /= np.sum(self.weights)
+        weights = self.sensor_model.evaluate(self.particles, downsampled)
+        if weights is None:
+            return
+        weight_sum = np.sum(weights)
+        if weight_sum == 0:
+            return
+        self.weights = weights / weight_sum
 
         # resample particles based on their weights (higher weighted particles are more likely to be selected)
         indices = np.random.choice(self.num_particles, size=self.num_particles, p=self.weights)
         self.particles = self.particles[indices]
 
+        # add small noise after resampling to maintain particle diversity
+        self.particles += np.random.normal(0, 0.05, size=self.particles.shape)
+
         self.publish_pose_estimate()
 
     def publish_pose_estimate(self):
-        """
-        We want to publish the estimated pose to:
-        1. Odometry msg on /pf/pose/odom (required by autograder)
-        2. TF broadcast from /map -> particle_filter_frame (for RViz car display)
-        3. PoseArray on /particles for particle cloud visualziton
-        """
-        # average x and y, use circular mean for theta
-        # CAN DO THIS A BETTER WAY PROBABLY BUT THIS IS SIMPLE SOLUTION FOR NOW
         mean_x = np.mean(self.particles[:, 0])
         mean_y = np.mean(self.particles[:, 1])
         mean_theta = np.arctan2(
@@ -182,50 +178,63 @@ class ParticleFilter(Node):
             np.mean(np.cos(self.particles[:, 2]))
         )
 
-        quat = Rotation.from_euler('xyz', [0, 0, mean_theta]).as_quat()
+        half = float(mean_theta) * 0.5
+        qz = float(np.sin(half))
+        qw = float(np.cos(half))
         now = self.get_clock().now().to_msg()
 
-        # publish odometry message with estimated pose  in /map frame
+        # 1. Publish odom message with PF estimate (required by autograder)
         odom_msg = Odometry()
         odom_msg.header.stamp = now
-        odom_msg.header.frame_id = "/map"
-        odom_msg.pose.pose.position.x = mean_x
-        odom_msg.pose.pose.position.y = mean_y
-        odom_msg.pose.pose.orientation.x = quat[0]
-        odom_msg.pose.pose.orientation.y = quat[1]
-        odom_msg.pose.pose.orientation.z = quat[2]
-        odom_msg.pose.pose.orientation.w = quat[3]
+        odom_msg.header.frame_id = "map"
+        odom_msg.pose.pose.position.x = float(mean_x)
+        odom_msg.pose.pose.position.y = float(mean_y)
+        odom_msg.pose.pose.orientation.z = qz
+        odom_msg.pose.pose.orientation.w = qw
         self.odom_pub.publish(odom_msg)
 
-        # publish transform from /map to particle_filter_frame
+        # 2. Publish map -> particle_filter_frame TF (required by README)
         t = TransformStamped()
         t.header.stamp = now
-        t.header.frame_id = "/map"
+        t.header.frame_id = "map"
         t.child_frame_id = self.particle_filter_frame
-        t.transform.translation.x = mean_x
-        t.transform.translation.y = mean_y
-        t.transform.translation.z = 0.0
-        t.transform.rotation.x = quat[0]
-        t.transform.rotation.y = quat[1]
-        t.transform.rotation.z = quat[2]
-        t.transform.rotation.w = quat[3]
+        t.transform.translation.x = float(mean_x)
+        t.transform.translation.y = float(mean_y)
+        t.transform.rotation.z = qz
+        t.transform.rotation.w = qw
         self.tf_broadcaster.sendTransform(t)
 
-        # publish pose array of all particles for rviz visualization
+        # 3. Publish particle cloud in map frame
         pose_array = PoseArray()
         pose_array.header.stamp = now
-        pose_array.header.frame_id = "/map"
-        for p in self.particles:
+        pose_array.header.frame_id = "map"
+        half_thetas = self.particles[:, 2] * 0.5
+        sin_h = np.sin(half_thetas)
+        cos_h = np.cos(half_thetas)
+        for i in range(self.num_particles):
             pose = Pose()
-            pose.position.x = p[0]
-            pose.position.y = p[1]
-            q = Rotation.from_euler('xyz', [0, 0, p[2]]).as_quat()
-            pose.orientation.x = q[0]
-            pose.orientation.y = q[1]
-            pose.orientation.z = q[2]
-            pose.orientation.w = q[3]
+            pose.position.x = float(self.particles[i, 0])
+            pose.position.y = float(self.particles[i, 1])
+            pose.orientation.z = float(sin_h[i])
+            pose.orientation.w = float(cos_h[i])
             pose_array.poses.append(pose)
         self.pose_array_pub.publish(pose_array)
+
+        # 4. Republish laser scan in the PF frame so it aligns with the map in RViz
+        if self.latest_scan is not None:
+            scan = LaserScan()
+            scan.header.stamp = now
+            scan.header.frame_id = self.particle_filter_frame
+            scan.angle_min = self.latest_scan.angle_min
+            scan.angle_max = self.latest_scan.angle_max
+            scan.angle_increment = self.latest_scan.angle_increment
+            scan.time_increment = self.latest_scan.time_increment
+            scan.scan_time = self.latest_scan.scan_time
+            scan.range_min = self.latest_scan.range_min
+            scan.range_max = self.latest_scan.range_max
+            scan.ranges = self.latest_scan.ranges
+            scan.intensities = self.latest_scan.intensities
+            self.scan_pub.publish(scan)
 
 def main(args=None):
     rclpy.init(args=args)
