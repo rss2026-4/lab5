@@ -5,14 +5,17 @@ class MotionModel:
 
     def __init__(self, node):
         ####################################
-        # TODO
         # Do any precomputation for the motion
         # model here.
 
-        self.deterministic = False 
+        node.declare_parameter('deterministic', False)
+        self.deterministic = node.get_parameter('deterministic').get_parameter_value().bool_value
         self.node = node
-        self.mean = 0
-        self.std_dev = 0.1
+
+        self.lin_noise_frac = 0.1
+        self.ang_noise_frac = 0.1
+        self.min_lin_noise = 1e-4
+        self.min_ang_noise = 1e-4
             
         ####################################
 
@@ -35,43 +38,19 @@ class MotionModel:
                 same size
         """
 
-        ####################################
-        x = particles[:, 0:1]
-        y = particles[:, 1:2]
-        theta = particles[:, 2:]
+        dx, dy, dtheta = odometry
+        cos_t = np.cos(particles[:, 2])
+        sin_t = np.sin(particles[:, 2])
 
-        N = len(x)
+        particles[:, 0] += dx * cos_t - dy * sin_t
+        particles[:, 1] += dx * sin_t + dy * cos_t
+        particles[:, 2] += dtheta
 
-        dx = odometry[0]
-        dy = odometry[1]
-        dtheta = odometry[2] 
-        
-        # apply motion 
-        new_x = x + dx*np.cos(theta) - dy*np.sin(theta)
-        new_y = y + dx*np.sin(theta) + dy*np.cos(theta)
-        new_theta = theta + dtheta
-        updated_particles = np.hstack([new_x, new_y, new_theta])
+        if not self.deterministic:
+            dist = np.sqrt(dx * dx + dy * dy)
+            N = particles.shape[0]
+            particles[:, 0] += np.random.normal(0, self.lin_noise_frac * dist + self.min_lin_noise, N)
+            particles[:, 1] += np.random.normal(0, self.lin_noise_frac * dist + self.min_lin_noise, N)
+            particles[:, 2] += np.random.normal(0, self.ang_noise_frac * abs(dtheta) + self.min_ang_noise, N)
 
-
-        # no noise
-        if self.deterministic:
-            # plt.plot(x, y, 'bo', label="original pos")
-            # plt.plot(new_x, new_y, 'ro', label="new pos")
-            # plt.title("Motion Model (noiseless)")
-            # for i in range(N):
-            #     plt.plot([new_x[i],x[i]], [new_y[i], y[i]], 'g')
-            # plt.ylabel("y_pos")
-            # plt.xlabel("x_pos")
-            # plt.legend()
-            # plt.show()
-            self.node.get_logger().info("No Noise")
-            return updated_particles 
-        
-        # noise added
-        else: 
-            self.node.get_logger().info("Yes Noise")
-            noise = np.random.normal(self.mean, self.std_dev, size = (N, 3)) # mean = 0, scale = 1
-            noisy_particles = updated_particles + noise
-            return noisy_particles
-        
-        ####################################
+        return particles

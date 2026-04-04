@@ -1,5 +1,9 @@
 <launch>
     <node pkg="localization" exec="particle_filter" name="particle_filter" output="screen">
-        <param from="$(find-pkg-share localization)/params.yaml"/>
+        <param from="$(find-pkg-share localization)/real_params.yaml"/>
     </node>
+
+    <!-- <node pkg="tf2_ros" exec="static_transform_publisher" name="base_link_to_laser"
+          args="0 0 0 0 0 0 base_link laser"/> -->
+
 </launch>

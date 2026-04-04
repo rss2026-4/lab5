@@ -6,7 +6,7 @@ particle_filter:
     # each particle. This doesn't need to be
     # equal to the actual number (>1000)
     # so long as you downsample properly
-    num_beams_per_particle: 99
+    num_beams_per_particle: 50
 
     # The field of view centered around theta=0
     scan_field_of_view: 4.71 # radians
@@ -23,9 +23,9 @@ particle_filter:
     odom_topic: "/vesc/odom"
 
     # The frame you should publish your transform to
-    particle_filter_frame: "/base_link"
+    particle_filter_frame: "base_link_pf"
 
     # Deterministic flag; set to true to remove all added noise
-    deterministic: false
+    deterministic: False
 
     lidar_scale_to_map_scale: 1.0
