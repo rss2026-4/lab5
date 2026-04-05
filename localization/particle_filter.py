@@ -130,7 +130,7 @@ class ParticleFilter(Node):
         self.last_odom_time = now
 
         # gather twist data to feed into motion model
-        dx = msg.twist.twist.linear.x * dt
+        dx = msg.twist.twist.linear.x * dt * 1.1
         dy = msg.twist.twist.linear.y * dt
         dtheta = msg.twist.twist.angular.z * dt
         odometry = np.array([dx, dy, dtheta])
@@ -160,7 +160,7 @@ class ParticleFilter(Node):
         if np.random.random() < 0.5:
             indices = np.random.choice(self.num_particles, size=self.num_particles, p=self.weights)
             self.particles = self.particles[indices]
-            self.particles += np.random.normal(0, [0.04, 0.04, 0.01], size=self.particles.shape)
+            self.particles += np.random.normal(0, [0.05, 0.05, 0.02], size=self.particles.shape)
             self.weights = np.ones(self.num_particles) / self.num_particles
         else:
             self.weights *= weights
