@@ -177,6 +177,8 @@ class SensorModel:
         # Multiply across beams (use log-sum to avoid underflow)
         # Squash by 1/num_beams to prevent particle depletion
         log_probs = np.sum(np.log(probs + 1e-300), axis=1) / observation.shape[0]
+        # Soften weights so the sensor model doesn't overwhelm the motion model
+        # in featureless areas. Values < 1.0 trust motion more; 1.0 = no change.
         probabilities = np.exp(log_probs)
 
 

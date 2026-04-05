@@ -1,23 +1,14 @@
 import numpy as np
-import matplotlib.pyplot as plt
 
 class MotionModel:
 
     def __init__(self, node):
-        ####################################
-        # Do any precomputation for the motion
-        # model here.
-
         node.declare_parameter('deterministic', False)
         self.deterministic = node.get_parameter('deterministic').get_parameter_value().bool_value
         self.node = node
+        self.lin_noise_frac = 0.15
+        self.ang_noise_frac = 0.15
 
-        self.lin_noise_frac = 0.1
-        self.ang_noise_frac = 0.1
-        self.min_lin_noise = 1e-4
-        self.min_ang_noise = 1e-4
-            
-        ####################################
 
     def evaluate(self, particles, odometry):
         """
@@ -34,7 +25,7 @@ class MotionModel:
             odometry: A 3-vector [dx dy dtheta]
 
         returns:
-            particles: An updated matrix of the
+            particles: An updated matrix of thera
                 same size
         """
 
@@ -47,10 +38,10 @@ class MotionModel:
         particles[:, 2] += dtheta
 
         if not self.deterministic:
-            dist = np.sqrt(dx * dx + dy * dy)
             N = particles.shape[0]
-            particles[:, 0] += np.random.normal(0, self.lin_noise_frac * dist + self.min_lin_noise, N)
-            particles[:, 1] += np.random.normal(0, self.lin_noise_frac * dist + self.min_lin_noise, N)
-            particles[:, 2] += np.random.normal(0, self.ang_noise_frac * abs(dtheta) + self.min_ang_noise, N)
+            dist = np.sqrt(dx * dx + dy * dy)
+            particles[:, 0] += np.random.normal(0, self.lin_noise_frac * dist + 1e-4, N)
+            particles[:, 1] += np.random.normal(0, self.lin_noise_frac * dist + 1e-4, N)
+            particles[:, 2] += np.random.normal(0, self.ang_noise_frac * abs(dtheta) + 1e-4, N)
 
         return particles

@@ -2,7 +2,7 @@ from localization.sensor_model import SensorModel
 from localization.motion_model import MotionModel
 
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import PoseWithCovarianceStamped, PoseArray, Pose
+from geometry_msgs.msg import PoseWithCovarianceStamped, PoseArray, Pose, PoseStamped
 
 from rclpy.node import Node
 import rclpy
@@ -58,6 +58,7 @@ class ParticleFilter(Node):
         #     "/map" frame.
 
         self.odom_pub = self.create_publisher(Odometry, "/pf/pose/odom", 1)
+        self.pose_pub = self.create_publisher(PoseStamped, "/pf/pose", 1)
 
         # Initialize the models
         self.motion_model = MotionModel(self)
@@ -135,20 +136,14 @@ class ParticleFilter(Node):
         odometry = np.array([dx, dy, dtheta])
 
         self.particles = self.motion_model.evaluate(self.particles, odometry)
-        self.publish_pose_estimate()
+        self.publish_tf()
             
     def laser_callback(self, msg):
-        """
-        This function is called on every new lidar scan. It first downsamples the scan,
-        then scores the particles based on the sensor model which tells how likely each
-        particle is to observe the scan. Then it resamples the particles based on weights.
-        """
         self.latest_scan = msg
 
         if not self.particle_init:
             return
 
-        # downsample lidar scan to num_beams_per_particle evenly spaced beams
         ranges = np.array(msg.ranges)
         indices = np.linspace(0, len(ranges) - 1, self.num_beams_per_particle, dtype=int)
         downsampled = ranges[indices]
@@ -161,80 +156,94 @@ class ParticleFilter(Node):
             return
         self.weights = weights / weight_sum
 
-        # resample particles based on their weights (higher weighted particles are more likely to be selected)
-        indices = np.random.choice(self.num_particles, size=self.num_particles, p=self.weights)
-        self.particles = self.particles[indices]
+        # Only resample ~50% of the time to preserve diversity
+        if np.random.random() < 0.5:
+            indices = np.random.choice(self.num_particles, size=self.num_particles, p=self.weights)
+            self.particles = self.particles[indices]
+            self.particles += np.random.normal(0, [0.04, 0.04, 0.01], size=self.particles.shape)
+            self.weights = np.ones(self.num_particles) / self.num_particles
+        else:
+            self.weights *= weights
+            self.weights /= np.sum(self.weights)
 
-        # add small noise after resampling to maintain particle diversity
-        self.particles += np.random.normal(0, 0.05, size=self.particles.shape)
+        self.publish_tf()
+        self.publish_viz()
 
-        self.publish_pose_estimate()
+        now = self.get_clock().now().to_msg()
+        scan = LaserScan()
+        scan.header.stamp = now
+        scan.header.frame_id = self.particle_filter_frame
+        scan.angle_min = msg.angle_min
+        scan.angle_max = msg.angle_max
+        scan.angle_increment = msg.angle_increment
+        scan.time_increment = msg.time_increment
+        scan.scan_time = msg.scan_time
+        scan.range_min = msg.range_min
+        scan.range_max = msg.range_max
+        scan.ranges = msg.ranges
+        scan.intensities = msg.intensities
+        self.scan_pub.publish(scan)
 
-    def publish_pose_estimate(self):
-        mean_x = np.mean(self.particles[:, 0])
-        mean_y = np.mean(self.particles[:, 1])
-        mean_theta = np.arctan2(
-            np.mean(np.sin(self.particles[:, 2])),
-            np.mean(np.cos(self.particles[:, 2]))
-        )
+    def publish_tf(self):
+        w = self.weights
+        mean_x = float(np.sum(w * self.particles[:, 0]))
+        mean_y = float(np.sum(w * self.particles[:, 1]))
+        mean_theta = float(np.arctan2(
+            np.sum(w * np.sin(self.particles[:, 2])),
+            np.sum(w * np.cos(self.particles[:, 2]))
+        ))
 
-        half = float(mean_theta) * 0.5
+        half = mean_theta * 0.5
         qz = float(np.sin(half))
         qw = float(np.cos(half))
         now = self.get_clock().now().to_msg()
 
-        # 1. Publish odom message with PF estimate (required by autograder)
         odom_msg = Odometry()
         odom_msg.header.stamp = now
         odom_msg.header.frame_id = "map"
-        odom_msg.pose.pose.position.x = float(mean_x)
-        odom_msg.pose.pose.position.y = float(mean_y)
+        odom_msg.child_frame_id = self.particle_filter_frame
+        odom_msg.pose.pose.position.x = mean_x
+        odom_msg.pose.pose.position.y = mean_y
         odom_msg.pose.pose.orientation.z = qz
         odom_msg.pose.pose.orientation.w = qw
         self.odom_pub.publish(odom_msg)
 
-        # 2. Publish map -> particle_filter_frame TF (required by README)
+        pose_msg = PoseStamped()
+        pose_msg.header.stamp = now
+        pose_msg.header.frame_id = "map"
+        pose_msg.pose.position.x = mean_x
+        pose_msg.pose.position.y = mean_y
+        pose_msg.pose.orientation.z = qz
+        pose_msg.pose.orientation.w = qw
+        self.pose_pub.publish(pose_msg)
+
         t = TransformStamped()
         t.header.stamp = now
         t.header.frame_id = "map"
         t.child_frame_id = self.particle_filter_frame
-        t.transform.translation.x = float(mean_x)
-        t.transform.translation.y = float(mean_y)
+        t.transform.translation.x = mean_x
+        t.transform.translation.y = mean_y
         t.transform.rotation.z = qz
         t.transform.rotation.w = qw
         self.tf_broadcaster.sendTransform(t)
 
-        # 3. Publish particle cloud in map frame
-        pose_array = PoseArray()
-        pose_array.header.stamp = now
-        pose_array.header.frame_id = "map"
-        half_thetas = self.particles[:, 2] * 0.5
-        sin_h = np.sin(half_thetas)
-        cos_h = np.cos(half_thetas)
-        for i in range(self.num_particles):
-            pose = Pose()
-            pose.position.x = float(self.particles[i, 0])
-            pose.position.y = float(self.particles[i, 1])
-            pose.orientation.z = float(sin_h[i])
-            pose.orientation.w = float(cos_h[i])
-            pose_array.poses.append(pose)
-        self.pose_array_pub.publish(pose_array)
-
-        # 4. Republish laser scan in the PF frame so it aligns with the map in RViz
-        if self.latest_scan is not None:
-            scan = LaserScan()
-            scan.header.stamp = now
-            scan.header.frame_id = self.particle_filter_frame
-            scan.angle_min = self.latest_scan.angle_min
-            scan.angle_max = self.latest_scan.angle_max
-            scan.angle_increment = self.latest_scan.angle_increment
-            scan.time_increment = self.latest_scan.time_increment
-            scan.scan_time = self.latest_scan.scan_time
-            scan.range_min = self.latest_scan.range_min
-            scan.range_max = self.latest_scan.range_max
-            scan.ranges = self.latest_scan.ranges
-            scan.intensities = self.latest_scan.intensities
-            self.scan_pub.publish(scan)
+    def publish_viz(self):
+        if self.pose_array_pub.get_subscription_count() > 0:
+            now = self.get_clock().now().to_msg()
+            pose_array = PoseArray()
+            pose_array.header.stamp = now
+            pose_array.header.frame_id = "map"
+            half_thetas = self.particles[:, 2] * 0.5
+            sin_h = np.sin(half_thetas)
+            cos_h = np.cos(half_thetas)
+            for i in range(self.num_particles):
+                pose = Pose()
+                pose.position.x = float(self.particles[i, 0])
+                pose.position.y = float(self.particles[i, 1])
+                pose.orientation.z = float(sin_h[i])
+                pose.orientation.w = float(cos_h[i])
+                pose_array.poses.append(pose)
+            self.pose_array_pub.publish(pose_array)
 
 def main(args=None):
     rclpy.init(args=args)
