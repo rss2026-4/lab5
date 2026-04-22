@@ -40,8 +40,10 @@ class MotionModel:
         if not self.deterministic:
             N = particles.shape[0]
             dist = np.sqrt(dx * dx + dy * dy)
-            particles[:, 0] += np.random.normal(0, self.lin_noise_frac * dist + 1e-4, N)
-            particles[:, 1] += np.random.normal(0, self.lin_noise_frac * dist + 1e-4, N)
+            particles[:, 0] += np.random.normal(0, self.lin_noise_frac, N)
+            particles[:, 1] += np.random.normal(0, self.lin_noise_frac, N)
+            # particles[:, 0] += np.random.normal(0, self.lin_noise_frac * dist + 1e-4, N)
+            # particles[:, 1] += np.random.normal(0, self.lin_noise_frac * dist + 1e-4, N)
             particles[:, 2] += np.random.normal(0, self.ang_noise_frac * abs(dtheta) + 1e-4, N)
 
         return particles

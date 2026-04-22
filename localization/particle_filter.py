@@ -130,7 +130,7 @@ class ParticleFilter(Node):
         self.last_odom_time = now
 
         # gather twist data to feed into motion model
-        dx = msg.twist.twist.linear.x * dt * 1.1
+        dx = msg.twist.twist.linear.x * dt
         dy = msg.twist.twist.linear.y * dt
         dtheta = msg.twist.twist.angular.z * dt
         odometry = np.array([dx, dy, dtheta])

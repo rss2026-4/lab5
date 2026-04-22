@@ -21,10 +21,21 @@ from rosbags.rosbag2 import Reader
 from rosbags.typesys import get_typestore, Stores
 
 
-TOPIC = "/pf/pose/odom"
+# TOPIC = "/tf"
 SCRIPT_DIR = Path(__file__).resolve().parent
-BAGS_DIR = SCRIPT_DIR.parent / "bags"
+BAGS_DIR = SCRIPT_DIR.parent / "bag_files"
 OUTPUT_DIR = SCRIPT_DIR / "csvs"
+
+CSV_HEADER_TF = [
+    "timestamp_sec",
+    "timestamp_nanosec",
+    "pos_x",
+    "pos_y",
+    "orient_x",
+    "orient_y",
+    "orient_z",
+    "orient_w",
+]
 
 CSV_HEADER = [
     "timestamp_sec",
@@ -44,12 +55,12 @@ def convert_bag(bag_path: Path, output_dir: Path, typestore):
     with Reader(bag_path) as reader:
         # Check if topic exists
         topic_names = [c.topic for c in reader.connections]
-        if TOPIC not in topic_names:
-            print(f"  [SKIP] Topic '{TOPIC}' not found in {bag_path.name}")
+        if "/pf/pose/odom" not in topic_names:
+            print(f"  [SKIP] Topic '/pf/pose/odom' not found in {bag_path.name}")
             return
 
         # Get the connection(s) for our topic
-        connections = [c for c in reader.connections if c.topic == TOPIC]
+        connections = [c for c in reader.connections if c.topic == '/pf/pose/odom']
         count = 0
         csv_path = output_dir / (bag_path.name + ".csv")
 
@@ -59,6 +70,7 @@ def convert_bag(bag_path: Path, output_dir: Path, typestore):
 
             for conn, timestamp, rawdata in reader.messages(connections=connections):
                 msg = typestore.deserialize_cdr(rawdata, conn.msgtype)
+
                 h = msg.header
                 p = msg.pose.pose.position
                 o = msg.pose.pose.orientation
@@ -70,6 +82,44 @@ def convert_bag(bag_path: Path, output_dir: Path, typestore):
                     o.x, o.y, o.z, o.w,
                 ])
                 count += 1
+
+        print(f"  [OK]   {bag_path.name} -> {csv_path.name}  ({count} messages)")
+
+def convert_bag_tf(bag_path: Path, output_dir: Path, typestore):
+    """Read a single bag and write /pf/pose/odom messages to a CSV."""
+    with Reader(bag_path) as reader:
+        # Check if topic exists
+        topic_names = [c.topic for c in reader.connections]
+        if "/tf" not in topic_names:
+            print(f"  [SKIP] Topic '/tf' not found in {bag_path.name}")
+            return
+
+        # Get the connection(s) for our topic
+        connections = [c for c in reader.connections if c.topic == '/tf']
+        count = 0
+        csv_path = output_dir / (bag_path.name + "_tf.csv")
+
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(CSV_HEADER_TF)
+
+            for conn, timestamp, rawdata in reader.messages(connections=connections):
+                msg = typestore.deserialize_cdr(rawdata, conn.msgtype)
+
+                # print(msg.transforms)
+                for t in msg.transforms:
+                    if t.child_frame_id == "base_link":
+                        h = t.header
+                        trans = t.transform.translation
+                        rot = t.transform.rotation
+                        
+                        writer.writerow([
+                            h.stamp.sec,
+                            h.stamp.nanosec,
+                            trans.x, trans.y, 
+                            rot.x, rot.y, rot.z, rot.w
+                        ])
+                        count += 1
 
         print(f"  [OK]   {bag_path.name} -> {csv_path.name}  ({count} messages)")
 
@@ -104,6 +154,7 @@ def main():
         print(f"Processing: {bp.name}")
         try:
             convert_bag(bp, OUTPUT_DIR, typestore)
+            convert_bag_tf(bp, OUTPUT_DIR, typestore)
         except Exception as e:
             print(f"  [ERR]  {bp.name}: {e}")
 
