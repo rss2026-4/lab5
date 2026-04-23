@@ -57,6 +57,7 @@ def plot_bag_sim(name, title=None):
     errors = np.sqrt((x_truth - x_est_interp)**2 + (y_truth - y_est_interp)**2)
     rmse = np.sqrt(np.mean(errors**2))
     mean_err = np.mean(errors)
+    var_err = np.var(errors)
 
     display_title = title if title else name
 
@@ -79,17 +80,17 @@ def plot_bag_sim(name, title=None):
     axes[1].axhline(mean_err, color="red", linestyle="--", label=f"mean = {mean_err:.3f} m")
     axes[1].set_xlabel("time (s)")
     axes[1].set_ylabel("euclidean error (m)")
-    axes[1].set_title(f"Error over time (RMSE = {rmse:.3f} m)")
+    axes[1].set_title(f"Error over time (RMSE = {rmse:.3f} m, Var = {var_err:.4f} m$^2$)")
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 
-    print(f"[{name}] RMSE = {rmse:.4f} m, Mean Error = {mean_err:.4f} m")
+    print(f"[{name}] RMSE = {rmse:.4f} m, Mean Error = {mean_err:.4f} m, Variance = {var_err:.6f} m^2")
 
     fig.suptitle(display_title, fontsize=14)
     plt.tight_layout()
 
-plot_bag_sim("noise.15", "estimate vs ground truth (noise = 0.15)")
-plot_bag_sim("noise1.0", "estimate vs ground truth (noise = 1.0)")
-plot_bag_sim("noise2.0", "estimate vs ground truth (noise = 2.0)")
-plot_bag_sim("noise3.0", "estimate vs ground truth (noise = 3.0)")
+plot_bag_sim("finalnoise0.01", "estimate vs ground truth (noise = 0.01)")
+plot_bag_sim("finalnoise0.05", "estimate vs ground truth (noise = 0.05)")
+plot_bag_sim("finalnoise0.1", "estimate vs ground truth (noise = 0.1)")
+plot_bag_sim("finalnoise0.2", "estimate vs ground truth (noise = 0.2)")
 plt.show()
